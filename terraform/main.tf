@@ -98,6 +98,8 @@ resource "aws_instance" "ai_observability" {
   vpc_security_group_ids = [aws_security_group.ai_observability.id]
   key_name               = var.key_name
 
+  # Script is >16KB (EC2 user-data limit), so ship it gzip-compressed;
+  # cloud-init on Ubuntu decompresses it automatically at boot.
   user_data_base64            = base64gzip(file("${path.module}/user_data.sh"))
   user_data_replace_on_change = true
 
