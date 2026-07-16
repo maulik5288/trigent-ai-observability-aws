@@ -1,0 +1,91 @@
+{
+  "uid": "llm-cost",
+  "title": "LLM Cost & Usage",
+  "timezone": "browser",
+  "time": { "from": "now-24h", "to": "now" },
+  "refresh": "1m",
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Total LLM spend (USD)",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "langfuse-ch" },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 4 }, "overrides": [] },
+      "targets": [{
+        "refId": "A", "format": 1,
+        "rawSql": "SELECT sum(total_cost) AS total_spend FROM observations WHERE start_time >= $__fromTime AND start_time <= $__toTime"
+      }]
+    },
+    {
+      "id": 2, "type": "stat", "title": "Total tokens",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "langfuse-ch" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [{
+        "refId": "A", "format": 1,
+        "rawSql": "SELECT sum(usage_details['total']) AS total_tokens FROM observations WHERE start_time >= $__fromTime AND start_time <= $__toTime"
+      }]
+    },
+    {
+      "id": 3, "type": "stat", "title": "p95 latency (ms)",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "langfuse-ch" },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [{
+        "refId": "A", "format": 1,
+        "rawSql": "SELECT quantile(0.95)(date_diff('millisecond', start_time, end_time)) AS p95_ms FROM observations WHERE end_time IS NOT NULL AND start_time >= $__fromTime AND start_time <= $__toTime"
+      }]
+    },
+    {
+      "id": 4, "type": "stat", "title": "LLM calls",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "langfuse-ch" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [{
+        "refId": "A", "format": 1,
+        "rawSql": "SELECT count() AS calls FROM observations WHERE type = 'GENERATION' AND start_time >= $__fromTime AND start_time <= $__toTime"
+      }]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Spend over time (USD)",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "langfuse-ch" },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" }, "overrides": [] },
+      "targets": [{
+        "refId": "A", "format": 0,
+        "rawSql": "SELECT $__timeInterval(start_time) AS time, sum(total_cost) AS spend FROM observations WHERE $__timeFilter(start_time) GROUP BY time ORDER BY time"
+      }]
+    },
+    {
+      "id": 6, "type": "piechart", "title": "Spend by model",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "langfuse-ch" },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" }, "overrides": [] },
+      "targets": [{
+        "refId": "A", "format": 1,
+        "rawSql": "SELECT coalesce(nullif(provided_model_name, ''), 'unknown') AS model, sum(total_cost) AS spend FROM observations WHERE $__timeFilter(start_time) GROUP BY model ORDER BY spend DESC LIMIT 10"
+      }]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Tokens over time",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 15 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "langfuse-ch" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [{
+        "refId": "A", "format": 0,
+        "rawSql": "SELECT $__timeInterval(start_time) AS time, sum(usage_details['input']) AS input_tokens, sum(usage_details['output']) AS output_tokens FROM observations WHERE $__timeFilter(start_time) GROUP BY time ORDER BY time"
+      }]
+    },
+    {
+      "id": 8, "type": "table", "title": "Most expensive traces",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 15 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "langfuse-ch" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [{
+        "refId": "A", "format": 1,
+        "rawSql": "SELECT trace_id, coalesce(nullif(provided_model_name, ''), 'unknown') AS model, round(sum(total_cost), 6) AS cost_usd, sum(usage_details['total']) AS tokens FROM observations WHERE $__timeFilter(start_time) GROUP BY trace_id, model ORDER BY cost_usd DESC LIMIT 20"
+      }]
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

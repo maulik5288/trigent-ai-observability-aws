@@ -1,0 +1,20 @@
+# Eval hook presets - each hook attaches a score to every new trace.
+# Extend this file with your own hooks; the worker picks them up on restart.
+latency_slo:
+  enabled: true
+  threshold_ms: 5000        # trace slower than this -> score 0
+
+cost_budget:
+  enabled: true
+  max_cost_usd: 0.05        # trace costing more than this -> score 0
+
+refusal_detector:
+  enabled: true
+  patterns:
+    - "i can't help"
+    - "i cannot help"
+    - "i'm sorry, but"
+    - "as an ai"
+
+empty_output:
+  enabled: true

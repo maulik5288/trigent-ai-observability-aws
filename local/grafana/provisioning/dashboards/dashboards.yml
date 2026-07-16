@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: ai-observability
+    folder: LLM Observability
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards
