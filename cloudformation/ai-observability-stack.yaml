@@ -1,0 +1,129 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Trigent AI Observability Stack - Langfuse v3 tracing + LLM cost dashboards
+  (Grafana/ClickHouse) + automated eval hooks, on a single EC2 instance.
+  TEST version: boots any region's latest Ubuntu 24.04 and installs the stack
+  at first boot. MARKETPLACE version: replace ImageId with the product AMI
+  RegionMap (see comments) and remove UserData (stack is baked into the AMI).
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: Network }
+        Parameters: [VpcId, SubnetId, AllowedCIDR]
+      - Label: { default: Instance }
+        Parameters: [InstanceType, KeyName, VolumeSize]
+    ParameterLabels:
+      AllowedCIDR: { default: Allowed source CIDR (your IP range) }
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to deploy into (default VPC is fine for evaluation)
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet in the selected VPC
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: EC2 key pair for SSH access (used to read generated credentials)
+  AllowedCIDR:
+    Type: String
+    Description: CIDR allowed to reach SSH (22), Langfuse (3000) and Grafana (3001). Use <your-ip>/32 or your ISP range.
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    ConstraintDescription: Must be a valid IPv4 CIDR, e.g. 203.0.113.10/32
+  InstanceType:
+    Type: String
+    Default: t3.large
+    AllowedValues: [t3.large, t3.xlarge, m6i.xlarge, m6i.2xlarge]
+    Description: t3.large (8 GB) minimum; t3.xlarge+ for production volumes
+  VolumeSize:
+    Type: Number
+    Default: 60
+    MinValue: 30
+    MaxValue: 500
+    Description: Root EBS volume size (GB)
+
+  # TEST MODE ONLY - resolves the latest Canonical Ubuntu 24.04 AMI per region.
+  # MARKETPLACE: delete this parameter and use the RegionMap below instead.
+  UbuntuAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    Description: (Test mode) latest Ubuntu 24.04 AMI via SSM public parameter
+
+# MARKETPLACE CONVERSION - uncomment and fill with the product AMI IDs that
+# AWS Marketplace clones into each enabled region; regions here must exactly
+# match the regions enabled in the Product Load Form. Then set
+# ImageId: !FindInMap [RegionMap, !Ref 'AWS::Region', AmiId]
+#
+# Mappings:
+#   RegionMap:
+#     us-east-1:      { AmiId: ami-XXXXXXXXXXXXXXXXX }
+#     ap-south-1:     { AmiId: ami-XXXXXXXXXXXXXXXXX }
+#     eu-west-1:      { AmiId: ami-XXXXXXXXXXXXXXXXX }
+
+Resources:
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AI Observability stack - Langfuse + Grafana
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 22,   ToPort: 22,   CidrIp: !Ref AllowedCIDR, Description: SSH }
+        - { IpProtocol: tcp, FromPort: 3000, ToPort: 3000, CidrIp: !Ref AllowedCIDR, Description: Langfuse UI + API }
+        - { IpProtocol: tcp, FromPort: 3001, ToPort: 3001, CidrIp: !Ref AllowedCIDR, Description: Grafana cost dashboards }
+      SecurityGroupEgress:
+        - { IpProtocol: '-1', CidrIp: 0.0.0.0/0, Description: All outbound }
+      Tags:
+        - { Key: Name, Value: !Sub '${AWS::StackName}-sg' }
+
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${AWS::StackName}-lt'
+      LaunchTemplateData:
+        ImageId: !Ref UbuntuAmiId   # MARKETPLACE: !FindInMap [RegionMap, !Ref 'AWS::Region', AmiId]
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyName
+        MetadataOptions:
+          HttpTokens: required        # IMDSv2
+          HttpEndpoint: enabled
+          HttpPutResponseHopLimit: 2  # containers can reach IMDS
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              VolumeSize: !Ref VolumeSize
+              VolumeType: gp3
+              Encrypted: true
+              DeleteOnTermination: true
+        # TEST MODE ONLY - gzipped first-boot bootstrap (cloud-init decompresses).
+        # MARKETPLACE: remove UserData entirely; the baked AMI runs the same
+        # provisioning from a first-boot systemd unit.
+        UserData: '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'
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds: [!GetAtt SecurityGroup.GroupId]
+      Tags:
+        - { Key: Name, Value: !Ref 'AWS::StackName' }
+        - { Key: Project, Value: ai-observability-marketplace }
+
+Outputs:
+  PublicIp:
+    Description: Instance public IP
+    Value: !GetAtt Instance.PublicIp
+  LangfuseURL:
+    Description: Langfuse UI (allow 5-8 minutes after stack completion for first boot)
+    Value: !Sub 'http://${Instance.PublicIp}:3000'
+  GrafanaURL:
+    Description: Grafana LLM cost dashboards
+    Value: !Sub 'http://${Instance.PublicIp}:3001'
+  CredentialsCommand:
+    Description: Fetch generated credentials (admin logins + API keys)
+    Value: !Sub "ssh -i <your-key.pem> ubuntu@${Instance.PublicIp} 'sudo cat /opt/ai-observability/credentials.txt'"
+  InstanceId:
+    Value: !Ref Instance
