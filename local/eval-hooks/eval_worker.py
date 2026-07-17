@@ -83,15 +83,23 @@ def eval_trace(trace: dict) -> None:
                    "output empty" if empty else "output present")
 
 
-def fetch_recent_traces() -> list:
-    r = requests.get(
-        f"{HOST}/api/public/traces",
-        auth=AUTH,
-        params={"limit": 50, "orderBy": "timestamp.desc"},
-        timeout=30,
-    )
-    r.raise_for_status()
-    return r.json().get("data", [])
+def fetch_all_traces(max_pages: int = 50) -> list:
+    """Paginate through the full trace list so every trace gets evaluated,
+    regardless of batch size or back-dated timestamps."""
+    traces = []
+    for page in range(1, max_pages + 1):
+        r = requests.get(
+            f"{HOST}/api/public/traces",
+            auth=AUTH,
+            params={"limit": 100, "page": page, "orderBy": "timestamp.desc"},
+            timeout=30,
+        )
+        r.raise_for_status()
+        data = r.json().get("data", [])
+        if not data:
+            break
+        traces.extend(data)
+    return traces
 
 
 def main() -> None:
@@ -99,7 +107,7 @@ def main() -> None:
     print(f"[eval-worker] started; {len(processed)} traces already processed")
     while True:
         try:
-            traces = fetch_recent_traces()
+            traces = fetch_all_traces()
             new = [t for t in traces if t["id"] not in processed]
             for trace in new:
                 try:
